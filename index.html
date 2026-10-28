@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FIT zu Polar CSV</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Exo:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#F0F9FF; --card:#FFFFFF; --fg:#0C4A6E; --mut:#475569; --line:#BAE6FD; --soft:#E8F2F8;
+    --primary:#0284C7; --on-primary:#FFFFFF; --hr:#DC2626; --err:#B91C1C;
+  }
+  @media (prefers-color-scheme: dark) { :root {
+    --bg:#0B1220; --card:#111A2E; --fg:#E0F2FE; --mut:#94A3B8; --line:#1E3A5F; --soft:#16233B;
+    --primary:#38BDF8; --on-primary:#0B1220; --hr:#F87171; --err:#FCA5A5;
+  } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 Exo,system-ui,sans-serif; }
+  main { max-width:960px; margin:0 auto; padding:40px 16px 64px; }
+  h1 { font-size:28px; font-weight:700; margin:0 0 4px; letter-spacing:-.01em; }
+  h2 { font-size:15px; font-weight:600; margin:0 0 16px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut); }
+  .lead { color:var(--mut); margin:0 0 28px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px; margin-bottom:16px; }
+  .drop { display:flex; flex-direction:column; align-items:center; gap:8px; padding:36px 16px; border:2px dashed var(--line);
+          border-radius:12px; cursor:pointer; text-align:center; transition:border-color .2s, background .2s; }
+  .drop:hover, .drop.over, .drop:focus-within { border-color:var(--primary); background:var(--soft); }
+  .drop input { position:absolute; opacity:0; width:1px; height:1px; }
+  .drop strong { font-weight:600; } .drop span { color:var(--mut); font-size:14px; }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:12px; margin-bottom:16px; }
+  .stat { background:var(--soft); border-radius:8px; padding:10px 12px; }
+  .stat small { display:block; color:var(--mut); font-size:13px; }
+  .stat b { font:500 20px 'Roboto Mono',monospace; }
+  .chart-wrap { position:relative; height:320px; touch-action:none; }
+  canvas { width:100%; height:100%; display:block; cursor:crosshair; border-radius:6px; }
+  canvas:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+  #tip { position:absolute; pointer-events:none; background:var(--fg); color:var(--bg); font:500 13px 'Roboto Mono',monospace;
+         padding:4px 8px; border-radius:6px; white-space:nowrap; transform:translate(-50%,-130%); }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-top:12px; }
+  .hint { color:var(--mut); font-size:13px; margin:0; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:14px; }
+  label { display:flex; flex-direction:column; font-size:14px; font-weight:500; gap:6px; }
+  input:not([type=file]) { font:16px 'Roboto Mono',monospace; padding:10px; min-height:44px; border:1px solid var(--line);
+          border-radius:8px; background:var(--bg); color:var(--fg); }
+  input:focus-visible, button:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+  button { font:600 16px Exo,sans-serif; min-height:44px; padding:10px 20px; border-radius:8px; cursor:pointer;
+           border:1px solid var(--primary); background:var(--primary); color:var(--on-primary); transition:opacity .15s; }
+  button:hover { opacity:.88; }
+  button.ghost { background:transparent; color:var(--primary); }
+  #err { color:var(--err); margin-top:12px; font-weight:500; }
+  [hidden] { display:none !important; }
+  footer { color:var(--mut); font-size:13px; text-align:center; margin-top:32px; }
+  footer a { color:var(--primary); }
+  @media (prefers-reduced-motion: reduce) { * { transition:none !important; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>FIT → Polar CSV</h1>
+  <p class="lead">Herzfrequenz aus einer .fit-Datei, auf 1&nbsp;s interpoliert, im Polar-Flow-CSV-Format. Alles läuft lokal im Browser.</p>
+
+  <div class="card">
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept=".fit">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+      <strong id="dropText">.fit-Datei auswählen oder hierher ziehen</strong>
+      <span>Garmin, Wahoo, Coros, …</span>
+    </label>
+    <div id="err" role="alert"></div>
+  </div>
+
+  <section class="card" id="chartCard" hidden>
+    <h2>Herzfrequenz</h2>
+    <div class="stats" id="stats"></div>
+    <div class="chart-wrap">
+      <canvas id="chart" tabindex="0" aria-label="Herzfrequenzverlauf. Pfeiltasten bewegen den Cursor, Plus und Minus zoomen, 0 setzt zurück."></canvas>
+      <div id="tip" hidden></div>
+    </div>
+    <div class="row">
+      <p class="hint">Ziehen zum Zoomen · Doppelklick oder „Zurücksetzen“ für alles · Tastatur: ← → + − 0</p>
+      <button type="button" class="ghost" id="reset">Zurücksetzen</button>
+    </div>
+  </section>
+
+  <form class="card" id="form" hidden>
+    <h2>Metadaten</h2>
+    <div class="grid">
+      <label>Name<input name="name" autocomplete="off"></label>
+      <label>Sport<input name="sport"></label>
+      <label>Kalorien (kcal)<input name="calories" inputmode="numeric"></label>
+      <label>Größe (cm)<input name="height" inputmode="decimal"></label>
+      <label>Gewicht (kg)<input name="weight" inputmode="decimal"></label>
+      <label>HF max<input name="hrMax" inputmode="numeric"></label>
+      <label>HF Ruhe (sitzend)<input name="hrSit" inputmode="numeric"></label>
+      <label>VO2max<input name="vo2max" inputmode="decimal"></label>
+      <label>Notizen<input name="notes"></label>
+    </div>
+    <div class="row"><span class="hint" id="info"></span><button>CSV herunterladen</button></div>
+  </form>
+
+  <footer><a href="https://github.com/finn-dreisigacker/fit2polar">Quellcode auf GitHub</a></footer>
+</main>
+<script src="fit.js"></script>
+<script>
+  const $ = id => document.getElementById(id);
+  const form = $('form'), err = $('err'), cv = $('chart'), tip = $('tip');
+  let data, base, view, cursor = null, dragFrom = null;
+
+  async function load(f) {
+    err.textContent = ''; form.hidden = $('chartCard').hidden = true;
+    try {
+      data = extract(parseFit(new Uint8Array(await f.arrayBuffer())));
+      base = f.name.replace(/\.fit$/i, '');
+      for (const el of form.elements) if (el.name) el.value = data.meta[el.name] ?? '';
+      const hr = data.hr, avg = Math.round(hr.reduce((a, b) => a + b, 0) / hr.length);
+      $('stats').innerHTML = [['Dauer', hms(hr.length)], ['Ø HF', avg + ' bpm'],
+        ['Max HF', Math.max(...hr) + ' bpm'], ['Min HF', Math.min(...hr) + ' bpm']]
+        .map(([k, v]) => `<div class="stat"><small>${k}</small><b>${v}</b></div>`).join('');
+      $('info').textContent = `Start ${data.meta.start.toLocaleString('de-DE')}`;
+      $('dropText').textContent = f.name;
+      form.hidden = $('chartCard').hidden = false;
+      view = [0, hr.length - 1]; cursor = null; draw();
+    } catch (x) { err.textContent = x.message; }
+  }
+  $('file').onchange = e => e.target.files[0] && load(e.target.files[0]);
+  const drop = $('drop');
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = () => drop.classList.remove('over');
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); e.dataTransfer.files[0] && load(e.dataTransfer.files[0]); };
+
+  // --- chart (canvas: ~1 point per second is too many for SVG) ---
+  const PAD = { l: 44, r: 12, t: 12, b: 28 };
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const xOf = (i, w) => PAD.l + (i - view[0]) / Math.max(1, view[1] - view[0]) * (w - PAD.l - PAD.r);
+  const iOf = (x, w) => Math.round(view[0] + (x - PAD.l) / (w - PAD.l - PAD.r) * (view[1] - view[0]));
+  const clampI = i => Math.max(view[0], Math.min(view[1], i));
+
+  function draw() {
+    if (!data) return;
+    const dpr = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight, ctx = cv.getContext('2d');
+    cv.width = w * dpr; cv.height = h * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const seg = data.hr.slice(view[0], view[1] + 1);
+    const lo = Math.floor((Math.min(...seg) - 5) / 10) * 10, hi = Math.ceil((Math.max(...seg) + 5) / 10) * 10;
+    const yOf = v => PAD.t + (hi - v) / (hi - lo) * (h - PAD.t - PAD.b);
+    ctx.font = '12px "Roboto Mono", monospace'; ctx.fillStyle = css('--mut'); ctx.strokeStyle = css('--line'); ctx.lineWidth = 1;
+    const ystep = (hi - lo) > 80 ? 20 : 10;
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    for (let v = lo; v <= hi; v += ystep) {
+      const y = Math.round(yOf(v)) + .5;
+      ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(w - PAD.r, y); ctx.stroke(); ctx.fillText(v, PAD.l - 6, y);
+    }
+    const span = view[1] - view[0], xstep = [10, 30, 60, 120, 300, 600, 900, 1800, 3600].find(s => span / s <= 8) || 7200;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    for (let t = Math.ceil(view[0] / xstep) * xstep; t <= view[1]; t += xstep) ctx.fillText(hms(t).replace(/^00:/, ''), xOf(t, w), h - PAD.b + 8);
+    if (dragFrom != null && cursor != null) {
+      ctx.fillStyle = css('--soft'); const a = xOf(dragFrom, w), b = xOf(cursor, w);
+      ctx.fillRect(Math.min(a, b), PAD.t, Math.abs(b - a), h - PAD.t - PAD.b);
+    }
+    ctx.strokeStyle = css('--hr'); ctx.lineWidth = 1.75; ctx.lineJoin = 'round'; ctx.beginPath();
+    seg.forEach((v, k) => k ? ctx.lineTo(xOf(view[0] + k, w), yOf(v)) : ctx.moveTo(xOf(view[0], w), yOf(v)));
+    ctx.stroke();
+    if (cursor != null) {
+      const x = xOf(cursor, w), y = yOf(data.hr[cursor]);
+      ctx.strokeStyle = css('--mut'); ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(x, PAD.t); ctx.lineTo(x, h - PAD.b); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = css('--hr'); ctx.beginPath(); ctx.arc(x, y, 4, 0, 7); ctx.fill();
+      tip.hidden = false; tip.style.left = x + 'px'; tip.style.top = y + 'px';
+      tip.textContent = `${hms(cursor)} · ${data.hr[cursor]} bpm`;
+    } else tip.hidden = true;
+  }
+  function zoom(a, b) {
+    a = Math.max(0, Math.min(a, b)); b = Math.min(data.hr.length - 1, Math.max(a, b));
+    if (b - a >= 10) view = [a, b];
+    draw();
+  }
+  const evX = e => e.clientX - cv.getBoundingClientRect().left;
+  cv.onpointerdown = e => { dragFrom = clampI(iOf(evX(e), cv.clientWidth)); cv.setPointerCapture(e.pointerId); };
+  cv.onpointermove = e => { cursor = clampI(iOf(evX(e), cv.clientWidth)); draw(); };
+  cv.onpointerup = () => { if (dragFrom != null && Math.abs(cursor - dragFrom) > 2) zoom(dragFrom, cursor); dragFrom = null; draw(); };
+  cv.onpointerleave = () => { if (dragFrom == null) { cursor = null; draw(); } };
+  cv.ondblclick = $('reset').onclick = () => zoom(0, data.hr.length - 1);
+  cv.onkeydown = e => {
+    const span = view[1] - view[0], mid = cursor ?? Math.round((view[0] + view[1]) / 2);
+    const k = { ArrowLeft: () => cursor = clampI(mid - (e.shiftKey ? 10 : 1)), ArrowRight: () => cursor = clampI(mid + (e.shiftKey ? 10 : 1)),
+      '+': () => zoom(mid - span / 4, mid + span / 4), '-': () => zoom(mid - span, mid + span), '0': () => zoom(0, data.hr.length - 1) }[e.key];
+    if (k) { e.preventDefault(); k(); draw(); }
+  };
+  addEventListener('resize', draw);
+  matchMedia('(prefers-color-scheme: dark)').onchange = draw;
+
+  form.onsubmit = e => {
+    e.preventDefault();
+    const meta = { ...data.meta, ...Object.fromEntries(new FormData(form)) };
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([toPolarCsv(data.hr, meta)], { type: 'text/csv' }));
+    a.download = base + '.CSV'; a.click(); URL.revokeObjectURL(a.href);
+  };
+</script>
+</body>
+</html>
